@@ -65,24 +65,34 @@ export interface TimeFrame {
 }
 
 /**
- * Arco celestial cinematográfico. La cámara mira hacia -Z, así que
- * construimos la dirección del cuerpo celeste como:
- *   x = sin(azim) * cos(elev)         (izq → der)
- *   y = sin(elev)
- *   z = -cos(azim) * cos(elev)        (siempre por delante)
+ * Camino celeste continuo en forma de "rueda" frente a la cámara.
  *
- *   t = 0       -> medianoche (debajo del horizonte)
- *   t = 0.25    -> sale por la IZQUIERDA del encuadre (azim = -azimSpan/2)
- *   t = 0.5     -> punto más alto (azim = 0, elev = peakElev)
- *   t = 0.75    -> se pone por la DERECHA (azim = +azimSpan/2)
+ * La cámara mira hacia -Z. La rueda gira en sentido horario sobre el eje
+ * Z, así que el sol y la luna trazan un círculo (ligeramente oval por
+ * `hStretch`) completamente C∞ — sin saltos ni cambios de azimut bruscos
+ * en sunrise/sunset.
+ *
+ *   t = 0.25  sunrise  -> 9 en punto (izquierda, horizonte)
+ *   t = 0.50  mediodía -> 12 en punto (arriba)
+ *   t = 0.75  sunset   -> 3 en punto (derecha, horizonte)
+ *   t = 0.00  midnight -> 6 en punto (abajo, oculto bajo el horizonte)
+ *
+ * La luna va en el mismo eje pero desfasada 12 h (t + 0.5), así que
+ * cuando el sol se pone por la derecha la luna sale por la izquierda.
+ *
+ *   tiltDeg controla la "altura" angular del círculo (distancia desde
+ *   la mirada de la cámara). hStretch ensancha el círculo horizontalmente
+ *   para que el sol pase más tiempo cerca del horizonte (más rojo).
  */
-function celestialDir(out: THREE.Vector3, t: number, peakElevDeg: number, azimSpanDeg: number) {
-  const elev01 = Math.sin((t - 0.25) * Math.PI * 2); // -1..1
-  const elevRad = THREE.MathUtils.degToRad(elev01 * peakElevDeg);
-  const azim01 = (((t - 0.25) % 1) + 1) % 1; // 0..1 dentro del "día visible"
-  const azimRad = THREE.MathUtils.degToRad((azim01 - 0.5) * azimSpanDeg);
-  const cE = Math.cos(elevRad);
-  out.set(Math.sin(azimRad) * cE, Math.sin(elevRad), -Math.cos(azimRad) * cE).normalize();
+function celestialDir(out: THREE.Vector3, t: number, tiltDeg: number, hStretch: number) {
+  const angle = (t - 0.5) * Math.PI * 2;
+  const tilt = THREE.MathUtils.degToRad(tiltDeg);
+  const r = Math.sin(tilt);
+  out.set(
+    Math.sin(angle) * r * hStretch,
+    Math.cos(angle) * r,
+    -Math.cos(tilt),
+  ).normalize();
   return out;
 }
 
@@ -107,12 +117,10 @@ export class TimeOfDay {
     }
 
     const tt = state.timeOfDay;
-    // Sol: arco celestial bajo (peak 38°) que cruza completamente el
-    // encuadre horizontal de izq. a der., para que se lea como timelapse.
-    celestialDir(this.sunDir, tt, 38, 150);
-    // Luna: desfasada 12h (medio ciclo) → cuando el sol cae por la dcha,
-    // la luna sale por la izda, y viceversa.
-    celestialDir(this.moonDir, (tt + 0.5) % 1, 42, 150);
+    // Rueda celeste: el sol y la luna giran sobre el mismo círculo
+    // virtual frente a la cámara, desfasados medio ciclo.
+    celestialDir(this.sunDir, tt, 34, 1.35);
+    celestialDir(this.moonDir, (tt + 0.5) % 1, 34, 1.35);
     const sunY = this.sunDir.y;
 
     // Sun color

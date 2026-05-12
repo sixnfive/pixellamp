@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { state } from '../state';
 
 /**
  * Estrellas + luna. Las estrellas son Points en una esfera celeste
@@ -10,17 +11,21 @@ import * as THREE from 'three';
 const starsVS = /* glsl */ `
 attribute float aSize;
 attribute float aSeed;
+attribute float aDensitySeed;
 attribute vec3 aColor;
 varying float vSeed;
 varying vec3 vColor;
 uniform float uPixelRatio;
+uniform float uDensity;
 void main(){
   vSeed = aSeed;
   vColor = aColor;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mv;
-  gl_PointSize = aSize * uPixelRatio;
-  gl_Position.z = gl_Position.w; // far plane
+  // Soft density cutoff por estrella (cada una tiene su propio umbral)
+  float visible = step(aDensitySeed, uDensity);
+  gl_PointSize = aSize * uPixelRatio * visible;
+  gl_Position.z = gl_Position.w;
 }
 `;
 
@@ -105,11 +110,12 @@ export class Stars {
   private moonRadius = 1500;
   private moonSize = 65;
 
-  constructor(count = 2500) {
+  constructor(count = 6000) {
     // Estrellas
     const positions = new Float32Array(count * 3);
     const sizes = new Float32Array(count);
     const seeds = new Float32Array(count);
+    const densitySeeds = new Float32Array(count);
     const colors = new Float32Array(count * 3);
 
     const radius = 1700;
@@ -131,6 +137,9 @@ export class Stars {
       const mag = Math.pow(Math.random(), 4.5);
       sizes[i] = 1.2 + mag * 4.5;
       seeds[i] = Math.random();
+      // densitySeed determina si está visible cuando el slider <= 1.
+      // Las estrellas más brillantes siempre se ven antes (seed bajo).
+      densitySeeds[i] = Math.pow(Math.random(), 1.0 + mag * 2.0);
 
       // Color: azuladas/blancas/algunas naranjas
       const t = Math.random();
@@ -148,6 +157,7 @@ export class Stars {
     geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geom.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
     geom.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 1));
+    geom.setAttribute('aDensitySeed', new THREE.BufferAttribute(densitySeeds, 1));
     geom.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
 
     this.starMat = new THREE.ShaderMaterial({
@@ -157,6 +167,7 @@ export class Stars {
         uTime: { value: 0 },
         uBrightness: { value: 0 },
         uPixelRatio: { value: Math.min(window.devicePixelRatio, 2) },
+        uDensity: { value: state.starsDensity },
       },
       transparent: true,
       depthWrite: false,
@@ -196,13 +207,15 @@ export class Stars {
 
   update(timeSeconds: number) {
     this.starMat.uniforms.uTime.value = timeSeconds;
+    this.starMat.uniforms.uDensity.value = state.starsDensity;
     // Las estrellas se encienden cuando el sol está claramente bajo el horizonte
     const sunY = this.sunDir.y;
-    const night = THREE.MathUtils.clamp(-sunY / 0.25, 0, 1);
-    this.starMat.uniforms.uBrightness.value = night * 1.4;
-    // La luna se ve incluso de día, pero atenuada por el cielo brillante
-    // (el bloom se la come). Subimos su brillo absoluto.
-    this.moonMat.uniforms.uBrightness.value = THREE.MathUtils.clamp(0.6 + night * 1.8, 0, 3.0);
+    const night = THREE.MathUtils.clamp(-sunY / 0.2, 0, 1);
+    this.starMat.uniforms.uBrightness.value = night * state.starsBrightness;
+    // La luna se ve incluso de día atenuada
+    this.moonMat.uniforms.uBrightness.value = THREE.MathUtils.clamp(0.4 + night * 2.0, 0, 3.0);
+    // Tamaño en vivo
+    this.moon.scale.setScalar(state.moonSize);
     // Ocúltala si está bajo el horizonte para no clavar un disco oscuro
     this.moon.visible = this.moonDir.y > -0.05;
   }

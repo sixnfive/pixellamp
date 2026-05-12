@@ -52,7 +52,10 @@ export function buildPanel(): GUI {
   fAtm.add(state, 'turbidity', 0.2, 8, 0.01).name('turbidez');
   fAtm.add(state, 'ozoneStrength', 0, 3, 0.01).name('ozono');
   fAtm.add(state, 'sunIntensity', 0, 60, 0.1).name('intens. sol');
-  fAtm.add(state, 'sunSize', 0.3, 4, 0.01).name('tamaño sol');
+  fAtm.add(state, 'sunSize', 0.3, 20, 0.05).name('tamaño sol');
+  fAtm.add(state, 'moonSize', 0.2, 8, 0.01).name('tamaño luna');
+  fAtm.add(state, 'starsDensity', 0, 1, 0.001).name('estrellas (densidad)');
+  fAtm.add(state, 'starsBrightness', 0, 4, 0.01).name('estrellas (brillo)');
 
   // ── Nubes ──
   const fCloud = gui.addFolder('Nubes');

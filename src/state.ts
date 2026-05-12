@@ -30,6 +30,9 @@ export interface AppState {
   ozoneStrength: number;
   sunIntensity: number;
   sunSize: number;
+  moonSize: number;
+  starsDensity: number;
+  starsBrightness: number;
   exposure: number;
 
   // Nubes
@@ -71,6 +74,9 @@ export const state: AppState = {
   ozoneStrength: 1.0,
   sunIntensity: 24.0,
   sunSize: 4.5,
+  moonSize: 1.0,
+  starsDensity: 1.0,
+  starsBrightness: 1.4,
   exposure: 1.0,
 
   cloudCoverage: 0.45,
