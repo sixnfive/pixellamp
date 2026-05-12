@@ -157,17 +157,24 @@ void scatter(vec3 ro, vec3 rd, vec3 sunDir, out vec3 inscatter, out vec3 transmi
   }
 }
 
-vec3 sunDisc(vec3 rd, vec3 sunDir, vec3 trans){
+vec3 sunDisc(vec3 rd, vec3 sunDir, vec3 trans, float sunY){
   float cosAng = clamp(dot(rd, sunDir), -1.0, 1.0);
   float ang = acos(cosAng);
   float disc = radians(0.53 * uSunSize);
-  float core = 1.0 - smoothstep(disc * 0.85, disc, ang);
-  float halo = exp(-pow(ang / (disc * 4.0), 2.0)) * 0.18;
-  // limb darkening
+  // Disco con borde suave (más visible que el sol real, está bien aquí)
+  float core = 1.0 - smoothstep(disc * 0.78, disc * 1.05, ang);
+  // Halo interno (corona) y halo exterior (god-ray) más amplios al amanecer/atardecer
+  float lowSun = 1.0 - smoothstep(0.0, 0.35, sunY);
+  float halo  = exp(-pow(ang / (disc * 5.0), 2.0)) * 0.35;
+  float godRay = exp(-pow(ang / (disc * 14.0), 2.0)) * 0.55 * lowSun;
+  // Limb darkening del disco
   float mu = max(0.0, 1.0 - ang / disc);
   float limb = mix(0.55, 1.0, pow(mu, 0.45));
-  vec3 sunCol = vec3(1.0, 0.96, 0.86);
-  return sunCol * uSunIntensity * (core * 80.0 * limb + halo) * trans;
+  // Color del disco: blanco al mediodía, ámbar/escarlata cerca del horizonte
+  vec3 cWarm = vec3(1.0, 0.55, 0.25);
+  vec3 cWhite = vec3(1.0, 0.96, 0.86);
+  vec3 sunCol = mix(cWarm, cWhite, smoothstep(0.0, 0.35, sunY));
+  return sunCol * uSunIntensity * (core * 110.0 * limb + halo + godRay) * trans;
 }
 
 void main(){
@@ -182,7 +189,7 @@ void main(){
   // Disco solar (sólo si el sol está sobre/cerca del horizonte)
   if(sunDir.y > -0.05){
     vec3 sunTrans = exp(-tauFromOD(opticalDepth(ro, sunDir, raySphere(ro, sunDir, R_ATMOS).y)));
-    inscatter += sunDisc(rd, sunDir, sunTrans);
+    inscatter += sunDisc(rd, sunDir, sunTrans, sunDir.y);
   }
 
   // Pequeño "lift" nocturno (luz residual estrellada/zodiacal)

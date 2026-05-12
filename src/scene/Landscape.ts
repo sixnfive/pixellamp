@@ -14,6 +14,52 @@ import { state } from '../state';
  * (atardecer dorado, noche azulada, etc.).
  */
 
+/**
+ * Bloque común para shaders de paisaje: fbm 3D + proyección de sombras
+ * de nubes desde la posición del fragmento hacia el plano de nubes a lo
+ * largo del rayo del sol. Se reusa el mismo campo de ruido que la capa
+ * de nubes para que la sombra "case" con lo que se ve arriba.
+ */
+const FRAG_COMMON = /* glsl */ `
+uniform float uCloudCoverage;
+uniform float uCloudSpeed;
+uniform float uCloudHeight;
+uniform float uCloudSharpness;
+
+float hash3(vec3 p){
+  p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float noise3(vec3 p){
+  vec3 i = floor(p); vec3 f = fract(p);
+  f = f*f*(3.0 - 2.0*f);
+  return mix(mix(mix(hash3(i + vec3(0,0,0)), hash3(i + vec3(1,0,0)), f.x),
+                 mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x),
+                 mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float fbm3(vec3 p){
+  float v = 0.0; float a = 0.5;
+  mat3 rot = mat3(0.80, 0.36, 0.48, -0.48, 0.86, 0.16, -0.36, -0.36, 0.86);
+  for(int i=0;i<4;i++){ v += a * noise3(p); p = rot * p * 2.02; a *= 0.5; }
+  return v;
+}
+
+float cloudShadow(vec3 worldPos, vec3 sunDir, float time){
+  if(uCloudCoverage < 0.02 || sunDir.y < 0.02) return 0.0;
+  float cloudY = 1500.0 + uCloudHeight * 4000.0 + 900.0;
+  float t = (cloudY - worldPos.y) / sunDir.y;
+  vec3 hit = worldPos + sunDir * t;
+  vec3 q = hit * 0.00012;
+  q.xz += time * uCloudSpeed * vec2(1.0, 0.7);
+  q.y *= 2.5;
+  float n = fbm3(q);
+  float edge = mix(0.45, 0.02, uCloudSharpness);
+  return smoothstep(1.0 - uCloudCoverage - edge, 1.0 - uCloudCoverage + edge, n);
+}
+`;
+
 const VS_TERRAIN = /* glsl */ `
 varying vec3 vWorldPos;
 varying vec3 vNormal;
@@ -77,22 +123,33 @@ uniform vec3 uSunColor;
 uniform vec3 uAmbientLow;
 uniform vec3 uAmbientHigh;
 uniform float uOpacity;
+uniform float uTime;
+` + FRAG_COMMON + /* glsl */ `
 void main(){
   vec3 N = normalize(vNormal);
-  float ndl = max(dot(N, normalize(uSunDir)), 0.0);
+  vec3 L = normalize(uSunDir);
+  float ndl = max(dot(N, L), 0.0);
+  // Sombra de nubes
+  float cs = cloudShadow(vWorldPos, L, uTime);
+  float lit = ndl * (1.0 - cs * 0.85);
   // Lit + ambient gradient
   float upDot = N.y * 0.5 + 0.5;
   vec3 ambient = mix(uAmbientLow, uAmbientHigh, upDot);
-  // Color base oscuro – las montañas leen como siluetas
-  vec3 albedo = mix(vec3(0.05, 0.06, 0.08), vec3(0.18, 0.16, 0.14), smoothstep(0.0, 30.0, vHeight));
+  // Roca: más contraste y veteado por altura
+  float veta = noise3(vWorldPos * vec3(0.02, 0.04, 0.02));
+  vec3 albedo = mix(vec3(0.04, 0.05, 0.07), vec3(0.22, 0.19, 0.16), smoothstep(0.0, 40.0, vHeight));
+  albedo = mix(albedo, albedo * 0.6, veta * 0.5);
   // Nieve en cumbres
-  float snow = smoothstep(45.0, 65.0, vHeight) * smoothstep(0.55, 0.85, N.y);
+  float snow = smoothstep(55.0, 85.0, vHeight) * smoothstep(0.55, 0.85, N.y);
   albedo = mix(albedo, vec3(0.78, 0.82, 0.88), snow);
 
-  vec3 col = albedo * (uSunColor * ndl + ambient);
+  vec3 col = albedo * (uSunColor * lit + ambient);
+  // Rim warm en cumbres cuando el sol está bajo
+  float rim = pow(1.0 - max(N.y, 0.0), 2.0) * smoothstep(0.0, 0.18, L.y) * smoothstep(0.3, 0.0, L.y);
+  col += rim * uSunColor * 0.35 * (1.0 - cs);
   // Aerial perspective con la distancia
   float d = length(vWorldPos.xz);
-  float fog = smoothstep(220.0, 460.0, d);
+  float fog = smoothstep(180.0, 460.0, d);
   vec3 fogCol = mix(uAmbientLow, uAmbientHigh, 0.7) * 1.1;
   col = mix(col, fogCol, fog * 0.85);
   gl_FragColor = vec4(col, uOpacity);
@@ -117,6 +174,7 @@ uniform vec3 uHorizonColor;
 uniform vec3 uZenithColor;
 uniform float uTime;
 uniform float uOpacity;
+` + FRAG_COMMON + /* glsl */ `
 
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p){
@@ -149,7 +207,9 @@ void main(){
   float F = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
 
   vec3 deep = mix(vec3(0.01, 0.02, 0.035), vec3(0.04, 0.07, 0.10), uSunColor.r);
-  vec3 col = mix(deep, sky, F) + sun * F;
+  // Sombra de nube atenúa el reflejo del sol pero no el azul base
+  float cs = cloudShadow(vWorldPos, normalize(uSunDir), uTime);
+  vec3 col = mix(deep, sky, F) + sun * F * (1.0 - cs * 0.8);
   // Pequeño "fog" cercano para integrar con el horizonte
   float d = length(vWorldPos.xz);
   float fog = smoothstep(80.0, 240.0, d);
@@ -198,15 +258,21 @@ uniform vec3 uSunColor;
 uniform vec3 uAmbientLow;
 uniform vec3 uAmbientHigh;
 uniform float uOpacity;
+uniform float uTime;
+` + FRAG_COMMON + /* glsl */ `
 void main(){
   vec3 N = normalize(vNormal);
-  float ndl = max(dot(N, normalize(uSunDir)), 0.0);
+  vec3 L = normalize(uSunDir);
+  float ndl = max(dot(N, L), 0.0);
+  float cs = cloudShadow(vWorldPos, L, uTime);
+  float lit = ndl * (1.0 - cs * 0.85);
   float upDot = N.y * 0.5 + 0.5;
   vec3 ambient = mix(uAmbientLow, uAmbientHigh, upDot);
-  // Arena cálida
-  vec3 sand = mix(vec3(0.45, 0.32, 0.20), vec3(0.78, 0.62, 0.42), smoothstep(-2.0, 6.0, vHeight));
-  // Sombras de duna en la cara oeste se marcan via ndl
-  vec3 col = sand * (uSunColor * ndl + ambient * 1.05);
+  // Arena cálida con variación local
+  float grain = noise3(vWorldPos * 0.6) * 0.15;
+  vec3 sand = mix(vec3(0.45, 0.32, 0.20), vec3(0.82, 0.66, 0.44), smoothstep(-2.0, 6.0, vHeight));
+  sand *= 1.0 - grain;
+  vec3 col = sand * (uSunColor * lit + ambient * 1.1);
   float d = length(vWorldPos.xz);
   float fog = smoothstep(220.0, 480.0, d);
   vec3 fogCol = mix(uAmbientLow, uAmbientHigh, 0.6);
@@ -229,6 +295,7 @@ uniform vec3 uHorizonColor;
 uniform vec3 uZenithColor;
 uniform float uTime;
 uniform float uOpacity;
+` + FRAG_COMMON + /* glsl */ `
 
 float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p){
@@ -257,7 +324,8 @@ void main(){
   vec3 sunDirRefl = vec3(uSunDir.x, -uSunDir.y, uSunDir.z);
   float gl1 = pow(max(dot(R, normalize(sunDirRefl)), 0.0), 220.0);
   float gl2 = pow(max(dot(R, normalize(sunDirRefl)), 0.0), 12.0) * 0.2;
-  vec3 sun = uSunColor * (gl1 * 10.0 + gl2);
+  float cs = cloudShadow(vWorldPos, normalize(uSunDir), uTime);
+  vec3 sun = uSunColor * (gl1 * 10.0 + gl2) * (1.0 - cs * 0.8);
 
   float NdotV = max(dot(N, V), 0.0);
   float F = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
@@ -357,6 +425,10 @@ export class Landscape {
       uTime: { value: 0 },
       uHorizonColor: { value: this.horizonColor },
       uZenithColor: { value: this.zenithColor },
+      uCloudCoverage: { value: state.cloudCoverage },
+      uCloudSpeed: { value: state.cloudSpeed },
+      uCloudHeight: { value: state.cloudHeight },
+      uCloudSharpness: { value: state.cloudSharpness },
     };
   }
 
@@ -377,7 +449,7 @@ export class Landscape {
     group.add(lake);
 
     // Mountain ring
-    const mountUniforms = { ...this.commonUniforms(), uAmplitude: { value: 90 } };
+    const mountUniforms = { ...this.commonUniforms(), uAmplitude: { value: 145 } };
     const mountainMat = new THREE.ShaderMaterial({
       vertexShader: MOUNTAINS_VS,
       fragmentShader: MOUNTAINS_FS,
@@ -496,10 +568,14 @@ export class Landscape {
   }
 
   update(timeSeconds: number, sunY: number) {
-    // tiempo para olas y faro
+    // tiempo + parámetros de nubes para sombras drift en el paisaje
     const allMats = [...this.mountains.materials, ...this.desert.materials, ...this.coast.materials];
     for (const m of allMats) {
       if (m.uniforms.uTime) m.uniforms.uTime.value = timeSeconds;
+      if (m.uniforms.uCloudCoverage) m.uniforms.uCloudCoverage.value = state.cloudCoverage;
+      if (m.uniforms.uCloudSpeed) m.uniforms.uCloudSpeed.value = state.cloudSpeed;
+      if (m.uniforms.uCloudHeight) m.uniforms.uCloudHeight.value = state.cloudHeight;
+      if (m.uniforms.uCloudSharpness) m.uniforms.uCloudSharpness.value = state.cloudSharpness;
     }
     // Linterna del faro encendida al anochecer / noche
     const lanternOn = THREE.MathUtils.clamp(0.1 - sunY, 0, 1);

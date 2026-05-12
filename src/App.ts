@@ -53,10 +53,11 @@ export class App {
 
     // Scene & camera
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(48, w / h, 0.1, 5000);
-    // Cámara ligeramente elevada, mirando al horizonte
-    this.camera.position.set(0, 4, 12);
-    this.camera.lookAt(0, 6, -200);
+    this.camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 5000);
+    // Cámara casi al nivel del agua, ligeramente inclinada hacia abajo
+    // para que el horizonte quede a ~60% de altura y el paisaje respire.
+    this.camera.position.set(0, 2.4, 22);
+    this.camera.lookAt(0, 0.4, -200);
 
     // Subsistemas
     this.sky = new Sky();
@@ -121,6 +122,7 @@ export class App {
     this.clouds.setSunDirection(frame.sunDir);
     this.clouds.update(elapsed);
     this.stars.setSunDirection(frame.sunDir);
+    this.stars.setMoonDirection(frame.moonDir);
     this.stars.update(elapsed);
     this.landscape.setLighting(
       frame.sunDir,

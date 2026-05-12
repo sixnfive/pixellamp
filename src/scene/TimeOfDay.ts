@@ -55,6 +55,7 @@ function lerpColor(out: THREE.Color, a: THREE.Color, b: THREE.Color, t: number) 
 
 export interface TimeFrame {
   sunDir: THREE.Vector3;
+  moonDir: THREE.Vector3;
   sunY: number;
   sunColor: THREE.Color;
   ambientLow: THREE.Color;
@@ -63,8 +64,31 @@ export interface TimeFrame {
   zenithColor: THREE.Color;
 }
 
+/**
+ * Arco celestial cinematográfico. La cámara mira hacia -Z, así que
+ * construimos la dirección del cuerpo celeste como:
+ *   x = sin(azim) * cos(elev)         (izq → der)
+ *   y = sin(elev)
+ *   z = -cos(azim) * cos(elev)        (siempre por delante)
+ *
+ *   t = 0       -> medianoche (debajo del horizonte)
+ *   t = 0.25    -> sale por la IZQUIERDA del encuadre (azim = -azimSpan/2)
+ *   t = 0.5     -> punto más alto (azim = 0, elev = peakElev)
+ *   t = 0.75    -> se pone por la DERECHA (azim = +azimSpan/2)
+ */
+function celestialDir(out: THREE.Vector3, t: number, peakElevDeg: number, azimSpanDeg: number) {
+  const elev01 = Math.sin((t - 0.25) * Math.PI * 2); // -1..1
+  const elevRad = THREE.MathUtils.degToRad(elev01 * peakElevDeg);
+  const azim01 = (((t - 0.25) % 1) + 1) % 1; // 0..1 dentro del "día visible"
+  const azimRad = THREE.MathUtils.degToRad((azim01 - 0.5) * azimSpanDeg);
+  const cE = Math.cos(elevRad);
+  out.set(Math.sin(azimRad) * cE, Math.sin(elevRad), -Math.cos(azimRad) * cE).normalize();
+  return out;
+}
+
 export class TimeOfDay {
   private sunDir = new THREE.Vector3(0, 1, 0);
+  private moonDir = new THREE.Vector3(0, -1, 0);
   private sunColor = new THREE.Color();
   private ambientLow = new THREE.Color();
   private ambientHigh = new THREE.Color();
@@ -82,16 +106,13 @@ export class TimeOfDay {
       this.elapsed = state.timeOverride * state.dayDuration;
     }
 
-    // Elevación del sol con peak ~70° al mediodía
     const tt = state.timeOfDay;
-    const elev = Math.sin((tt - 0.25) * Math.PI * 2);
-    const elevRad = elev * THREE.MathUtils.degToRad(70);
-    // Pequeño tilt en azimut para que el sol no recorra exactamente el plano xy
-    const azim = THREE.MathUtils.degToRad(20);
-    const cy = Math.sin(elevRad);
-    const cx = Math.cos(elevRad) * Math.cos(azim);
-    const cz = Math.cos(elevRad) * Math.sin(azim);
-    this.sunDir.set(cx, cy, cz).normalize();
+    // Sol: arco celestial bajo (peak 38°) que cruza completamente el
+    // encuadre horizontal de izq. a der., para que se lea como timelapse.
+    celestialDir(this.sunDir, tt, 38, 150);
+    // Luna: desfasada 12h (medio ciclo) → cuando el sol cae por la dcha,
+    // la luna sale por la izda, y viceversa.
+    celestialDir(this.moonDir, (tt + 0.5) % 1, 42, 150);
     const sunY = this.sunDir.y;
 
     // Sun color
@@ -140,6 +161,7 @@ export class TimeOfDay {
 
     return {
       sunDir: this.sunDir,
+      moonDir: this.moonDir,
       sunY,
       sunColor: this.sunColor,
       ambientLow: this.ambientLow,

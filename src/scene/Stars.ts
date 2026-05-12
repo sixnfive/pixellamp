@@ -101,9 +101,9 @@ export class Stars {
   readonly starMat: THREE.ShaderMaterial;
   readonly moonMat: THREE.ShaderMaterial;
   private sunDir = new THREE.Vector3(0, 1, 0);
-  private moonDir = new THREE.Vector3();
+  private moonDir = new THREE.Vector3(0, -1, 0);
   private moonRadius = 1500;
-  private moonSize = 35;
+  private moonSize = 65;
 
   constructor(count = 2500) {
     // Estrellas
@@ -186,21 +186,24 @@ export class Stars {
 
   setSunDirection(dir: THREE.Vector3) {
     this.sunDir.copy(dir);
-    // La luna va opuesta al sol (simplificado), un poco rotada en azimut
-    this.moonDir.copy(dir).multiplyScalar(-1);
-    // ligera elevación para que no quede exactamente en el horizonte cuando el sol está en el cénit
-    this.moonDir.y += 0.1;
-    this.moonDir.normalize();
+  }
+
+  setMoonDirection(dir: THREE.Vector3) {
+    this.moonDir.copy(dir).normalize();
     this.moon.position.copy(this.moonDir).multiplyScalar(this.moonRadius);
     this.moon.lookAt(0, 0, 0);
   }
 
   update(timeSeconds: number) {
     this.starMat.uniforms.uTime.value = timeSeconds;
-    // Brillo de estrellas/luna se activa cuando el sol está bajo el horizonte
+    // Las estrellas se encienden cuando el sol está claramente bajo el horizonte
     const sunY = this.sunDir.y;
-    const night = THREE.MathUtils.clamp(-(sunY) / 0.25, 0, 1); // 0 con sol arriba, 1 ya bajo horizonte
+    const night = THREE.MathUtils.clamp(-sunY / 0.25, 0, 1);
     this.starMat.uniforms.uBrightness.value = night * 1.4;
-    this.moonMat.uniforms.uBrightness.value = THREE.MathUtils.clamp(0.4 + night * 1.6, 0, 2.5);
+    // La luna se ve incluso de día, pero atenuada por el cielo brillante
+    // (el bloom se la come). Subimos su brillo absoluto.
+    this.moonMat.uniforms.uBrightness.value = THREE.MathUtils.clamp(0.6 + night * 1.8, 0, 3.0);
+    // Ocúltala si está bajo el horizonte para no clavar un disco oscuro
+    this.moon.visible = this.moonDir.y > -0.05;
   }
 }

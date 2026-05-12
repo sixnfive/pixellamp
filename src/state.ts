@@ -56,10 +56,10 @@ export interface AppState {
 
 export const state: AppState = {
   timeSpeed: 1.0,
-  dayDuration: 60,
+  dayDuration: 45,
   freezeTime: false,
-  timeOverride: 0.78, // atardecer por defecto, queda bonito
-  timeOfDay: 0.78,
+  timeOverride: 0.7, // golden hour
+  timeOfDay: 0.7,
 
   landscape: 'mountains-lake',
   landscapeBlend: 0,
@@ -69,8 +69,8 @@ export const state: AppState = {
   mieG: 0.78,
   turbidity: 2.2,
   ozoneStrength: 1.0,
-  sunIntensity: 22.0,
-  sunSize: 1.0,
+  sunIntensity: 24.0,
+  sunSize: 4.5,
   exposure: 1.0,
 
   cloudCoverage: 0.45,
